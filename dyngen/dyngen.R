@@ -8,15 +8,20 @@ set.seed(1)
 
 # Define backbone and other parameters
 names(list_backbones())
-backbone <- backbone_linear()
+backbone <- backbone_disconnected(left_backbone = backbone_cycle(), 
+                                  right_backbone = backbone_linear(),
+                                  num_common_modules = 0)
 backbone$expression_patterns 
+backbone$module_network
+backbone$module_info
+write.csv(backbone$expression_patterns,"dis_1000/expression_patterns_disconnected_cycle_linear.csv")
 
 config <- initialise_model(
   num_tfs = nrow(backbone$module_info),
-  num_targets = 500,
+  num_targets = 100,
   num_hks = 0,
   backbone = backbone,
-  num_cells = 1000,
+  num_cells = 300,
   simulation_params = simulation_default(
     burn_time = simtime_from_backbone(backbone, burn = TRUE) * 1.5,
     compute_rna_velocity = TRUE,
@@ -65,7 +70,7 @@ plot_gold_simulations(model) + scale_colour_brewer(palette = "Dark2")
 # simulations mapped to gold standard
 plot_gold_mappings(model, do_facet = FALSE) + scale_colour_brewer(palette = "Dark2")
 # expression of the modules (average of TFs)
-plot_simulation_expression(model, 1:4, what = "mol_mrna")
+plot_simulation_expression(model_cycle, 1:4, what = "mol_mrna")
 
 # Experiment emulation
 model <- generate_experiment(model)
@@ -75,9 +80,7 @@ dataset <- as_dyno(model)
 plot_dimred(dataset)
 
 plot_graph(dataset)
-# save
-write_rds(model, "model.rds", compress = "gz")
-write_rds(dataset, "dataset.rds", compress = "gz")
+
 
 # alternative: Convert to an anndata/SCE/Seurat object
 library(anndata)
@@ -90,19 +93,30 @@ write_rds(sce, "dataset_sce.rds")
 
 library(Seurat)
 seurat <- as_seurat(model)
-write_rds(seurat, "GeneTrajectory/dataset_seurat_linear_500.rds")
+write_rds(seurat, "GeneTrajectory/dataset_seurat_dis_cycle_linear_1000.rds")
 
 # One-shot function
 out <- generate_dataset(
   config,
   format = "dyno",
-  make_plots = FALSE
+  make_plots = TRUE
 )
 
 dataset <- out$dataset
 model <- out$model
 print(out$plot)
+# Save
+write_rds(model, "dis_1000/model_dis_1000.rds", compress = "gz")
+write_rds(dataset, "dis_1000/dataset_dis_1000.rds", compress = "gz")
 
+out$plot[[9]]
+
+out$plot
+
+
+# Load
+data_cycle <- readRDS("dis_1000/dataset_dis_1000.rds")
+model_cycle <- readRDS("dis_1000/model_dis_1000.rds")
 
 
 
@@ -130,6 +144,10 @@ feature_network_tmp <-
   )
 
 gr <- tbl_graph(nodes = feature_info, edges = feature_network_tmp)
+gr_df <- as.data.frame(gr)
+tf_df <- gr_df %>% filter(is_tf == TRUE)
+
+
 layout <- igraph::layout_with_fr(gr) %>%
   dynutils::scale_minmax() %>%
   magrittr::set_rownames(feature_info$feature_id) %>%
@@ -148,10 +166,10 @@ edge_df <-
   bind_rows(
     feature_network %>% mutate(group = "Global GRN"),
     dataset$regulatory_network_sc %>%
-      filter(cell_id %in% cells) %>%
+      filter(cell_id %in% cell_wps) %>%
       arrange(as.character(regulator) == as.character(target)) %>%
       left_join(feature_network %>% select(regulator, target, effect), by = c("regulator", "target")) %>%
-      mutate(effect = strength, group = paste0("GRN of cell ", match(cell_id, cells)))
+      mutate(effect = strength, group = paste0("GRN of cell ", match(cell_id, cell_wps)))
   ) %>%
   mutate(
     regulator = as.character(regulator),
